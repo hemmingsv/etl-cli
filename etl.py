@@ -55,9 +55,6 @@ def cmd_run(
     tfm = transformer or discover_script(directory, "transform.sh", required=False)
     ldr = loader or discover_script(directory, "loader.sh", required=False)
 
-    if ext is None:
-        return 1  # discover_script already logged
-
     log.info("Extracting with %s", ext)
     lines = run_extractor(ext)
     if lines is None:
@@ -87,6 +84,7 @@ def cmd_run(
 
     if failures:
         log.warning("%d item(s) failed", failures)
+        return 1
     return 0
 
 
@@ -183,7 +181,6 @@ async def load_items(
         return 0
 
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_LOADERS)
-    failures = 0
 
     async def _load_one(item_id: str, item_dir: Path) -> bool:
         async with semaphore:
@@ -240,11 +237,10 @@ def discover_script(directory: Path, pattern: str, required: bool = True) -> str
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        log.error("Multiple matches for *%s in %s: %s", pattern, directory, matches)
-        sys.exit(1)
+        raise SystemExit(f"Multiple matches for *{pattern} in {directory}: {matches}")
     if required:
         log.error("No executable *%s found in %s", pattern, directory)
-        sys.exit(1)
+        return None
     return None
 
 
@@ -328,9 +324,9 @@ CONCEPTS
 
   The power of etl comes from separation of concern. You only have
   to worry about building an extractor, then you slap etl on top of
-  it and you get deuplication (the extractor needs no logic for
+  it and you get deduplication (the extractor needs no logic for
   this) and if you slap cron on top of etl, you have a polling
-  pipline.
+  pipeline.
 
   State lives in a state/ folder inside the operating directory.
   Items are sharded by the first two characters of the sanitized ID.
