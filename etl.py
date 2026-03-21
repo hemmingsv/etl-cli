@@ -345,6 +345,10 @@ CONCEPTS
   The presence of <id>.run.0 marks an item as done. Failed items
   (any <id>.run.<non-zero>) are retried on the next run.
 
+  Clearly for this to work, you have to write extractors that have
+  consistent id outputs for same item. E.g. a scraper could use the
+  ids used on the websie, rather than generating uuids on the fly.
+
   Transformers can act as filters by exiting non-zero for items
   that should be ignored. Filtered items leave no trace and will
   be retried every run.
