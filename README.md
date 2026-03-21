@@ -55,9 +55,9 @@ CONCEPTS
 
   The power of etl comes from separation of concern. You only have
   to worry about building an extractor, then you slap etl on top of
-  it and you get deuplication (the extractor needs no logic for
+  it and you get deduplication (the extractor needs no logic for
   this) and if you slap cron on top of etl, you have a polling
-  pipline.
+  pipeline.
 
   State lives in a state/ folder inside the operating directory.
   Items are sharded by the first two characters of the sanitized ID.

@@ -1,7 +1,7 @@
 [project]
 name = "etl"
 version = "0.1.0"
-description = "Add your description here"
+description = "A minimal extract-deduplicate-transform-load pipeline"
 requires-python = ">=3.14"
 dependencies = []
 
