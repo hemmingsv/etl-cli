@@ -33,6 +33,7 @@ def main() -> int:
         extractor=args.extractor,
         transformer=args.transformer,
         loader=args.loader,
+        clean_gt_days=args.clean_gt_days,
     )
 
 
@@ -41,6 +42,7 @@ def cmd_run(
     extractor: str | None,
     transformer: str | None,
     loader: str | None,
+    clean_gt_days: int | None = None,
 ) -> int:
     directory = directory.resolve()
     if not directory.is_dir():
@@ -65,6 +67,8 @@ def cmd_run(
 
     if not new_items:
         log.warning("No new items")
+        if clean_gt_days is not None:
+            cmd_clean(directory, clean_gt_days)
         return 0
 
     log.info("Processing %d new item(s)", len(new_items))
@@ -81,6 +85,9 @@ def cmd_run(
         to_load.append((item_id, item_dir))
 
     failures = asyncio.run(load_items(to_load, ldr))
+
+    if clean_gt_days is not None:
+        cmd_clean(directory, clean_gt_days)
 
     if failures:
         log.warning("%d item(s) failed", failures)
@@ -303,11 +310,15 @@ EXAMPLES
   etl clean /path/to/pollrc.d --days 30
       Remove all state older than 30 days recursively.
 
+  etl /path/to/poller --clean-gt-days 30
+      Run pipeline and clean state older than 30 days.
+
 OPTIONS
   [directory]               Operating directory (default: current directory)
   --extractor PATH          Path to extractor script
   --transformer PATH        Path to transformer script
   --loader PATH             Path to loader script
+  --clean-gt-days N         Clean state older than N days after running
   -v, --verbose             Enable debug logging
   -h, --help                Show this help message
 
@@ -412,6 +423,7 @@ def _parse_run(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--extractor")
     parser.add_argument("--transformer")
     parser.add_argument("--loader")
+    parser.add_argument("--clean-gt-days", type=int, default=None)
     ns = parser.parse_args(argv)
     ns.command = "run"
     return ns

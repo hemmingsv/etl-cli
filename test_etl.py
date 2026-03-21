@@ -276,6 +276,67 @@ class TestRunPipeline:
         # Now run.0 should exist
         assert (item_dir / "retry1.run.0").exists()
 
+    def test_clean_gt_days_removes_old_state(self, tmp_path: Path) -> None:
+        write_script(
+            tmp_path / "extract.sh",
+            """\
+            #!/usr/bin/env bash
+            echo "new1 data"
+            """,
+        )
+
+        # Pre-create old state that should be cleaned
+        old_dir = tmp_path / "state" / "ol" / "old1"
+        old_dir.mkdir(parents=True)
+        run_file = old_dir / "old1.run.0"
+        run_file.write_text("")
+        old_time = run_file.stat().st_mtime - 60 * 86400
+        os.utime(str(run_file), (old_time, old_time))
+
+        result = subprocess.run(
+            [ETL, str(tmp_path), "--clean-gt-days", "30"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        # New item should be processed
+        assert (tmp_path / "state" / "ne" / "new1" / "new1.run.0").exists()
+        # Old item should be cleaned
+        assert not old_dir.exists()
+
+    def test_clean_gt_days_runs_after_loader_failure(self, tmp_path: Path) -> None:
+        write_script(
+            tmp_path / "extract.sh",
+            """\
+            #!/usr/bin/env bash
+            echo "fail1 data"
+            """,
+        )
+        write_script(
+            tmp_path / "loader.sh",
+            """\
+            #!/usr/bin/env bash
+            exit 1
+            """,
+        )
+
+        # Pre-create old state
+        old_dir = tmp_path / "state" / "ol" / "old1"
+        old_dir.mkdir(parents=True)
+        run_file = old_dir / "old1.run.0"
+        run_file.write_text("")
+        old_time = run_file.stat().st_mtime - 60 * 86400
+        os.utime(str(run_file), (old_time, old_time))
+
+        result = subprocess.run(
+            [ETL, str(tmp_path), "--clean-gt-days", "30"],
+            capture_output=True,
+            text=True,
+        )
+        # Pipeline failed but clean should still have run
+        assert result.returncode == 1
+        assert not old_dir.exists()
+
 
 class TestClean:
     def test_clean_old_items(self, tmp_path: Path) -> None:

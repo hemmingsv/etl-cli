@@ -34,11 +34,15 @@ EXAMPLES
   etl clean /path/to/pollrc.d --days 30
       Remove all state older than 30 days recursively.
 
+  etl /path/to/poller --clean-gt-days 30
+      Run pipeline and clean state older than 30 days.
+
 OPTIONS
   [directory]               Operating directory (default: current directory)
   --extractor PATH          Path to extractor script
   --transformer PATH        Path to transformer script
   --loader PATH             Path to loader script
+  --clean-gt-days N         Clean state older than N days after running
   -v, --verbose             Enable debug logging
   -h, --help                Show this help message
 
