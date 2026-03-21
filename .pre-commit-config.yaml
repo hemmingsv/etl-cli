@@ -25,6 +25,13 @@ repos:
         files: ^(etl\.py|README\.md)$
         pass_filenames: false
 
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        types: [python]
+        pass_filenames: false
+
       - id: ty
         name: ty
         entry: uv run ty check
