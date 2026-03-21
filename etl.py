@@ -381,6 +381,19 @@ FULL EXAMPLE
 
   Cron entry:
       */15 * * * * etl /home/user/pollers/rss
+
+  NOTE: You must make these scripts executable for it to work.
+  NOTE: The exectubale files need not be shell scripts.
+
+VIBE CODING
+  It is notoriously easy to vibe code an etl pipeline. Open up your command
+  line agent, such as `claude` and then do:
+
+      ! mkdir my-pipeline
+      ! etl --help
+      make a pipeline in that foler that ...
+
+  (`!` in claude executes command line and hands the output to the agent)
 """
 
 
