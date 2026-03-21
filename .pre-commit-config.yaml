@@ -18,6 +18,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: generate-readme
+        name: generate-readme
+        entry: uv run python generate_readme.py
+        language: system
+        files: ^(etl\.py|README\.md)$
+        pass_filenames: false
+
       - id: ty
         name: ty
         entry: uv run ty check
