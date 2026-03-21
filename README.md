@@ -42,6 +42,7 @@ OPTIONS
   --extractor PATH          Path to extractor script
   --transformer PATH        Path to transformer script
   --loader PATH             Path to loader script
+  --parallel N              Max parallel loaders (default: 10)
   --clean-gt-days N         Clean state older than N days after running
   -v, --verbose             Enable debug logging
   -h, --help                Show this help message
@@ -77,7 +78,7 @@ CONCEPTS
   that should be ignored. Filtered items leave no trace and will
   be retried every run.
 
-  Loaders run in parallel (up to 10 at a time).
+  Loaders run in parallel (up to 10 at a time by default).
 
 FULL EXAMPLE
   An RSS alert poller. Only items with "ALERT:" in the title

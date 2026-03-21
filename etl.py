@@ -15,9 +15,6 @@ from pathlib import Path
 
 log = logging.getLogger("etl")
 
-MAX_CONCURRENT_LOADERS = 10
-
-
 # === Flow ===
 
 
@@ -34,6 +31,7 @@ def main() -> int:
         transformer=args.transformer,
         loader=args.loader,
         clean_gt_days=args.clean_gt_days,
+        parallel=args.parallel,
     )
 
 
@@ -43,6 +41,7 @@ def cmd_run(
     transformer: str | None,
     loader: str | None,
     clean_gt_days: int | None = None,
+    parallel: int = 10,
 ) -> int:
     directory = directory.resolve()
     if not directory.is_dir():
@@ -84,7 +83,7 @@ def cmd_run(
         data_file.write_text(data)
         to_load.append((item_id, item_dir))
 
-    failures = asyncio.run(load_items(to_load, ldr))
+    failures = asyncio.run(load_items(to_load, ldr, max_concurrent=parallel))
 
     if clean_gt_days is not None:
         cmd_clean(directory, clean_gt_days)
@@ -180,6 +179,7 @@ def transform_item(
 async def load_items(
     items: list[tuple[str, Path]],
     loader: str | None,
+    max_concurrent: int = 10,
 ) -> int:
     if not loader:
         for item_id, item_dir in items:
@@ -187,7 +187,7 @@ async def load_items(
             run_file.write_text("")
         return 0
 
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_LOADERS)
+    semaphore = asyncio.Semaphore(max_concurrent)
 
     async def _load_one(item_id: str, item_dir: Path) -> bool:
         async with semaphore:
@@ -318,6 +318,7 @@ OPTIONS
   --extractor PATH          Path to extractor script
   --transformer PATH        Path to transformer script
   --loader PATH             Path to loader script
+  --parallel N              Max parallel loaders (default: 10)
   --clean-gt-days N         Clean state older than N days after running
   -v, --verbose             Enable debug logging
   -h, --help                Show this help message
@@ -353,7 +354,7 @@ CONCEPTS
   that should be ignored. Filtered items leave no trace and will
   be retried every run.
 
-  Loaders run in parallel (up to 10 at a time).
+  Loaders run in parallel (up to 10 at a time by default).
 
 FULL EXAMPLE
   An RSS alert poller. Only items with "ALERT:" in the title
@@ -427,6 +428,7 @@ def _parse_run(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--extractor")
     parser.add_argument("--transformer")
     parser.add_argument("--loader")
+    parser.add_argument("--parallel", type=int, default=10)
     parser.add_argument("--clean-gt-days", type=int, default=None)
     ns = parser.parse_args(argv)
     ns.command = "run"
