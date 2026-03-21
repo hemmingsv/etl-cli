@@ -48,7 +48,7 @@ CONCEPTS
   deduplicate are mandatory.
 
   The extractor outputs lines to stdout in the format:
-      <id> <data>
+      <id> [data]
 
   IDs are sanitized (only alphanumeric, underscore, and dash are
   kept) and used to create state directories for deduplication.

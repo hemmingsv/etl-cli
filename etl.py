@@ -214,9 +214,9 @@ def parse_extractor_line(line: str) -> tuple[str, str] | None:
     if not line or line[0].isspace():
         return None
     parts = line.split(None, 1)
-    if len(parts) < 2:
+    if not parts:
         return None
-    return parts[0], parts[1]
+    return parts[0], parts[1] if len(parts) > 1 else ""
 
 
 def sanitize_id(raw_id: str) -> str:
@@ -317,7 +317,7 @@ CONCEPTS
   deduplicate are mandatory.
 
   The extractor outputs lines to stdout in the format:
-      <id> <data>
+      <id> [data]
 
   IDs are sanitized (only alphanumeric, underscore, and dash are
   kept) and used to create state directories for deduplication.

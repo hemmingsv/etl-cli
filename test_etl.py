@@ -50,7 +50,7 @@ def test_parse_extractor_line() -> None:
         "some data here",
     )
     assert mod.parse_extractor_line("id123\tdata") == ("id123", "data")
-    assert mod.parse_extractor_line("nospace") is None
+    assert mod.parse_extractor_line("idonly") == ("idonly", "")
 
     assert mod.parse_extractor_line(" test") is None
     assert mod.parse_extractor_line(" data with several words and no id") is None
@@ -128,6 +128,22 @@ class TestRunPipeline:
         assert (item_dir / "item1.run.0").read_text() == "already done"
         assert not (item_dir / "item1.data").exists(), "Should not create data entry"
 
+    def test_id_only_extraction(self, tmp_path: Path) -> None:
+        write_script(
+            tmp_path / "extract.sh",
+            """\
+            #!/usr/bin/env bash
+            echo "alertid"
+            """,
+        )
+
+        result = subprocess.run([ETL, str(tmp_path)], capture_output=True, text=True)
+        assert result.returncode == 0
+
+        item_dir = tmp_path / "state" / "al" / "alertid"
+        assert (item_dir / "alertid.data").read_text() == ""
+        assert (item_dir / "alertid.run.0").exists()
+
     def test_no_transformer_no_loader(self, tmp_path: Path) -> None:
         write_script(
             tmp_path / "extract.sh",
@@ -192,7 +208,7 @@ class TestRunPipeline:
         )
 
         result = subprocess.run([ETL, str(tmp_path)], capture_output=True, text=True)
-        assert result.returncode == 0  # etl itself succeeds
+        assert result.returncode == 1
 
         item_dir = tmp_path / "state" / "fa" / "fail1"
         assert not (item_dir / "fail1.run.0").exists()
