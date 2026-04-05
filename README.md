@@ -7,9 +7,6 @@ operation built in.
 
 Everything is stored on disk and there are options to clean the state files.
 
-If you write a consistent extractor, then it is easy to strap etl on top of
-it and then cron on top of etl to make it a proper polling pipeline on disk.
-
 ## Install
 
 ```sh
