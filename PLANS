@@ -1,0 +1,252 @@
+Future plans for the ETL CLI project. These plans are
+incremental — options and features not mentioned here
+(--parallel, --clean-gt-days, etl clean, etc.) remain
+unchanged.
+
+Ordered by implementation sequence. Dependencies noted
+where relevant.
+
+=== 1. Duplicate ID dedup ===
+
+If the extractor emits the same ID more than once in a
+single run, only the first occurrence is used. The
+duplicates are logged as warnings. This is always on —
+duplicate IDs within one run contradict the deduplication
+model.
+
+No dependencies. Trivial change — track seen IDs in the
+dedup step.
+
+=== 2. --state-dir ===
+
+--state-dir overrides the default state directory (directory/state).
+The path is relative to the pipeline directory, not the CWD.
+This allows multiple ETL pipelines to share one directory with
+separate state, though for most cases a separate directory is
+simpler.
+
+No dependencies. Needed by environment variables and
+etl status later.
+
+=== 3. Commands ===
+
+Commands are passed as single strings and executed via sh -c
+with PATH=directory:$PATH. This means a bare script name like
+"extract.sh" resolves to the script in the pipeline directory,
+while "curl -s url | jq ..." works just as well.
+
+  -e, --extractor CMD    Extractor command
+  -t, --transformer CMD  Transformer command
+  -l, --loader CMD       Loader command
+  -c, --collector CMD    Collector command
+
+If neither -e nor -a is passed, -e - is assumed (read stdin).
+A warning is emitted: "No extractor command passed, will read
+from stdin. Pass `-e -` explicitly to silence this warning."
+This prevents users from sitting and waiting for an extractor
+to finish while etl is waiting on stdin.
+
+-e - (or --extractor -) reads stdin as extractor output.
+
+This is the fundamental execution model change. Everything
+below that runs commands depends on this.
+
+=== 4. Auto-discovery ===
+
+-a finds a single executable matching *extract.*, *transform.*,
+*loader.*, *collect.* in the directory for each stage. If
+multiple matches exist for a stage, it is an error. The
+extractor is required under -a — there is no stdin fallback.
+
+-a is opt-in because on multi-user systems a malicious script
+could be injected into the directory and executed under your
+user.
+
+Under -a, explicit flags (-e, -t, -l, -c) override the
+discovered script for that stage.
+
+Depends on: commands.
+
+=== 5. -0 null-delimited ===
+
+-0 makes the extractor output NULL-delimited instead of
+newline-delimited.
+
+Depends on: commands (extractor input handling).
+
+=== 6. Clean: skip current extractor IDs ===
+
+--clean-gt-days N cleans state older than N days after
+running. IDs that appeared in the current extractor output
+are never cleaned, even if their state is older than N days.
+This prevents back-bounces where a cleaned ID reappears in
+the next extractor run and gets reprocessed.
+
+Depends on: commands (since extraction now works
+differently). Could also go before commands if done against
+the old execution model — order is flexible here.
+
+=== 7. Environment variables ===
+
+All commands get PATH=directory:$PATH.
+
+  ETL_STATE_DIR   Path to the state directory. Passed to
+                  extractor, transformer, loader, collector.
+  ETL_ID          Item ID. Passed to transformer and loader.
+  ETL_DIR         Pipeline directory. Passed to collector.
+  ETL_IDS         Space-separated list of all item IDs that
+                  reached the load stage. Passed to collector.
+
+Depends on: commands (sh -c execution), --state-dir.
+
+=== 8. Architecture ===
+
+Internally, the pipeline uses a generator/result pattern.
+Each stage yields typed results:
+
+  Extractor yields:  RawItem(id, data) | Warning | Error
+  Dedup yields:      NewItem(id, data, path) | Skipped
+  Transformer yields: TransformedItem(id, data) | Filtered | Error
+
+This makes dry-run a consumer that prints instead of writes,
+and the real run a consumer that writes state and spawns
+loaders. Both consumers handle the same result types.
+
+Depends on: commands. This is the refactor that enables
+error handling, dry-run, and parsers.
+
+=== 9. Error handling ===
+
+Depends on: architecture.
+
+Extractor:
+
+  If the extractor exits non-zero, all complete lines
+  (terminated by newline) are still processed. After
+  processing completes, the extractor's stderr is logged
+  as a warning, and etl exits with the extractor's exit
+  code. Incomplete trailing data (no terminating newline)
+  is silently discarded when the exit code is non-zero.
+  When the exit code is 0, a trailing line without newline
+  is treated as complete.
+
+  --fail-empty (default) makes etl exit with error if the
+  extractor produces zero valid lines AND the exit code is
+  0. If the extractor already exited non-zero, zero valid
+  lines is logged as a warning (not an additional error)
+  since the non-zero exit code is already being forwarded.
+  --no-fail-empty disables the zero-valid-lines check
+  entirely.
+
+Transformer:
+
+  By default, any non-zero exit code silently filters the
+  item (current behavior). --filter-exits CODE[,CODE,...]
+  restricts which exit codes count as silent filters. Any
+  non-zero code not in the list is treated as an error:
+  stderr is logged as a warning and the exit code
+  contributes to the overall etl exit code.
+
+Loader:
+
+  Non-zero exit codes are always errors. stderr is logged
+  as a warning. The exit code is recorded in the .run.<N>
+  file and contributes to the overall etl exit code.
+
+Collector:
+
+  Non-zero exit codes are always errors. stderr is logged
+  as a warning. The exit code contributes to the overall
+  etl exit code.
+
+=== 10. Parsers ===
+
+Depends on: architecture (extractor yield types).
+
+The extractor output format is controlled by --parser:
+
+  --parser auto             Default. Lines starting with { are
+                           parsed as JSON (ID from _id key),
+                           otherwise as pop-first-col.
+  --parser pop-first-col   Each line is <id> <data>, split on
+                           first whitespace.
+  --parser ._id            Each line is a JSON object. The ID
+                           is taken from the named key. The
+                           entire JSON object is the data.
+
+=== 11. Collect stage ===
+
+Depends on: commands (-c flag), error handling (collector
+error semantics).
+
+Collect runs once after loading, if and only if at least one
+item reached the load stage (whether or not the loader
+succeeded). It receives all output files as arguments (full
+paths):
+
+  collect.py state/ab/abc1/abc1.run.0 state/fa/fail2/fail2.run.1 ...
+
+The collector decides how to handle successes vs failures
+based on the filenames. Collect also works without a loader —
+the items still produce empty .run.0 files as they do today,
+and those are passed as arguments.
+
+Collect does not run during --dry-run.
+
+=== 12. Dry run ===
+
+Depends on: architecture, error handling, collect stage
+(to know what to skip).
+
+--dry-run runs the extractor and transformer for real but
+does not run the loader, does not write any state files
+(.data or .run.*), and does not run the collector.
+
+Transformer input is always loaded from memory. Outside of
+dry-run, the .data file is also written to disk. In dry-run,
+the disk write is skipped so the state directory looks
+untouched.
+
+Output (all to stdout, colored):
+
+  *EXTRACTED*: <raw line>
+    -> skipped because <reason>              (red, if invalid)
+    -> id: <id>                              (grey)
+    -> data: <data>                          (grey)
+
+  *ALREADY EXISTS*: <state dir path>         (red)
+  *NEW ENTRY*: would write <state dir path>  (green)
+
+  *TRANSFORMED*:                             (grey)
+     <each line of transformed data, indented>
+  *FILTERED OUT*: exit code <code>           (red)
+
+  *WOULD LOAD*: <command that would run>     (yellow)
+
+Summary to stderr at the end:
+
+  Extracted: N, Invalid: N, Deduplicated: N,
+  Filtered: N, Would load: N
+
+The same code path handles both real and dry runs. Dry run
+is a flag on the existing flow, not a separate implementation.
+
+=== 13. etl status ===
+
+Depends on: --state-dir. Otherwise independent — can be
+implemented earlier if desired.
+
+  etl status [directory] [--state-dir DIR]
+
+Reads the state directory and prints:
+
+  - Number of items by exit code (0, 1, 2, ...).
+  - Last run date for each exit code (absolute + relative).
+  - Success rate (exit 0 / total) over: 1h, 12h, 24h,
+    3d, 7d, 30d, 90d, 365d, all time.
+
+=== 14. Future: parallel transformers ===
+
+Transformer parallelism (e.g. --parallel-transform N) with
+deterministic output ordering. Not planned for initial
+implementation.
