@@ -1325,6 +1325,93 @@ class TestStatus:
         assert "exit 0: 1 item(s)" in result.stdout
 
 
+class TestList:
+    def test_list_items(self, tmp_path: Path) -> None:
+        for name in ["item1", "item2"]:
+            shard = name[:2]
+            d = tmp_path / "state" / shard / name
+            d.mkdir(parents=True)
+            (d / f"{name}.data").write_text("data")
+            (d / f"{name}.run.0").write_text("")
+
+        result = subprocess.run(
+            [ETL, "list", str(tmp_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 2
+        # Each line: ID DATE PATH
+        for line in lines:
+            parts = line.split(" ", 2)
+            assert len(parts) == 3
+            assert parts[0] in ("item1", "item2")
+            assert parts[1].endswith("Z")
+            assert ".data" in parts[2]
+
+    def test_list_empty_state(self, tmp_path: Path) -> None:
+        (tmp_path / "state").mkdir()
+        result = subprocess.run(
+            [ETL, "list", str(tmp_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_list_custom_state_dir(self, tmp_path: Path) -> None:
+        d = tmp_path / "custom" / "it" / "item1"
+        d.mkdir(parents=True)
+        (d / "item1.data").write_text("data")
+
+        result = subprocess.run(
+            [ETL, "list", str(tmp_path), "--state-dir", "custom"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "item1" in result.stdout
+
+    def test_list_skips_items_without_data(self, tmp_path: Path) -> None:
+        """Items with .run but no .data file are skipped."""
+        d = tmp_path / "state" / "it" / "item1"
+        d.mkdir(parents=True)
+        (d / "item1.run.0").write_text("")
+
+        result = subprocess.run(
+            [ETL, "list", str(tmp_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_list_as_extractor_input(self, tmp_path: Path) -> None:
+        """etl list output can be piped as extractor input to another pipeline."""
+        # Create first pipeline's state
+        d = tmp_path / "state" / "it" / "item1"
+        d.mkdir(parents=True)
+        (d / "item1.data").write_text("hello world")
+        (d / "item1.run.0").write_text("")
+
+        # Use etl list as extractor for a second pipeline with separate state
+        result = subprocess.run(
+            [
+                ETL,
+                str(tmp_path),
+                "-e",
+                f"{ETL} list {tmp_path}",
+                "--state-dir",
+                "state2",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert (tmp_path / "state2" / "it" / "item1" / "item1.run.0").exists()
+
+
 class TestClean:
     def test_clean_old_items(self, tmp_path: Path) -> None:
         poller = tmp_path / "mypoller"

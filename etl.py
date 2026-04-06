@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
@@ -240,6 +240,9 @@ def main() -> int:
     if args.command == "status":
         return cmd_status(Path(args.directory), state_dir_name=args.state_dir)
 
+    if args.command == "list":
+        return cmd_list(Path(args.directory), state_dir_name=args.state_dir)
+
     filter_exits = None
     if args.filter_exits is not None:
         filter_exits = {int(c) for c in args.filter_exits.split(",")}
@@ -358,6 +361,26 @@ def cmd_status(
         total = len(window_items)
         pct = successes / total * 100
         print(f"  {label:>4s}: {pct:5.1f}% ({successes}/{total})")
+
+    return 0
+
+
+def cmd_list(
+    directory: Path,
+    state_dir_name: str = "state",
+) -> int:
+    """List all items in the state directory with ID, date, and data path."""
+    directory, state_dir = _resolve_directory(directory, state_dir_name)
+
+    from datetime import UTC, datetime
+
+    for item_id, item_dir in _iter_item_dirs(state_dir):
+        data_file = item_dir / f"{item_id}.data"
+        if not data_file.exists():
+            continue
+        mtime = data_file.stat().st_mtime
+        dt = datetime.fromtimestamp(mtime, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        print(f"{item_id} {dt} {data_file}")
 
     return 0
 
@@ -976,24 +999,36 @@ def _print_clean_dry_run_items(
         print(_grey(f"Nothing to clean (older than {days} days)"))
 
 
+def _iter_item_dirs(state_dir: Path) -> Iterator[tuple[str, Path]]:
+    # Synchronous directory walk, used by:
+    #   cmd_list     — standalone subcommand, no async
+    #   cmd_status   — standalone subcommand, no async (via _scan_state_dir)
+    #   cmd_clean    — standalone subcommand, no async (via _cleanable_items)
+    #   _run_pipeline — only after the async pipeline has fully drained
+    #                   (via _print_clean_dry_run → _cleanable_items)
+    # No async needed: all callers run after concurrent work is done.
+    if not state_dir.is_dir():
+        return
+    for shard_dir in sorted(state_dir.iterdir()):
+        if not shard_dir.is_dir():
+            continue
+        for item_dir in sorted(shard_dir.iterdir()):
+            if not item_dir.is_dir():
+                continue
+            yield item_dir.name, item_dir
+
+
 def _cleanable_items(
     state_dir: Path,
     threshold: float,
     protect_ids: set[str] | None = None,
 ) -> list[Path]:
     result: list[Path] = []
-    if not state_dir.is_dir():
-        return result
-    for shard_dir in state_dir.iterdir():
-        if not shard_dir.is_dir():
+    for item_id, item_dir in _iter_item_dirs(state_dir):
+        if protect_ids and item_id in protect_ids:
             continue
-        for item_dir in shard_dir.iterdir():
-            if not item_dir.is_dir():
-                continue
-            if protect_ids and item_dir.name in protect_ids:
-                continue
-            if _all_files_older_than(item_dir, threshold):
-                result.append(item_dir)
+        if _all_files_older_than(item_dir, threshold):
+            result.append(item_dir)
     return result
 
 
@@ -1022,26 +1057,17 @@ def _all_files_older_than(directory: Path, threshold: float) -> bool:
 
 def _scan_state_dir(state_dir: Path) -> list[tuple[str, int, float]]:
     items: list[tuple[str, int, float]] = []
-    for shard_dir in state_dir.iterdir():
-        if not shard_dir.is_dir():
+    for item_id, item_dir in _iter_item_dirs(state_dir):
+        run_files = [f for f in item_dir.iterdir() if f.name.startswith(f"{item_id}.run.")]
+        if not run_files:
             continue
-        for item_dir in shard_dir.iterdir():
-            if not item_dir.is_dir():
-                continue
-            item_id = item_dir.name
-            # Find the .run.N file with highest mtime
-            run_files = [f for f in item_dir.iterdir() if f.name.startswith(f"{item_id}.run.")]
-            if not run_files:
-                continue
-            # Use the latest run file
-            latest_run = max(run_files, key=lambda f: f.stat().st_mtime)
-            parts = latest_run.name.rsplit(".", 1)
-            try:
-                exit_code = int(parts[-1])
-            except ValueError:
-                continue
-            mtime = latest_run.stat().st_mtime
-            items.append((item_id, exit_code, mtime))
+        latest_run = max(run_files, key=lambda f: f.stat().st_mtime)
+        parts = latest_run.name.rsplit(".", 1)
+        try:
+            exit_code = int(parts[-1])
+        except ValueError:
+            continue
+        items.append((item_id, exit_code, latest_run.stat().st_mtime))
     return items
 
 
@@ -1386,6 +1412,12 @@ def _parse_args() -> argparse.Namespace:
         ns.verbose = verbose
         return ns
 
+    if argv and argv[0] == "list":
+        argv = argv[1:]
+        ns = _parse_list(argv)
+        ns.verbose = verbose
+        return ns
+
     if argv and argv[0] == "run":
         argv = argv[1:]
 
@@ -1411,6 +1443,15 @@ def _parse_status(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--state-dir", default="state")
     ns = parser.parse_args(argv)
     ns.command = "status"
+    return ns
+
+
+def _parse_list(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="etl list", add_help=False)
+    parser.add_argument("directory", nargs="?", default=".")
+    parser.add_argument("--state-dir", default="state")
+    ns = parser.parse_args(argv)
+    ns.command = "list"
     return ns
 
 
