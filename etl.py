@@ -587,7 +587,7 @@ async def _dedup(
             if len(seen_ids) > dedup_limit:
                 seen_ids.popitem(last=False)
             all_ids.add(item_id)
-            shard = item_id[:2]
+            shard = _shard(item_id)
             item_dir = state_dir / shard / item_id
             if _is_done(item_dir, item_id):
                 yield DedupWarning(id=item_id, path=str(item_dir))
@@ -1163,8 +1163,27 @@ def parse_extractor_line(line: str) -> tuple[str, str] | None:
 
 
 def sanitize_id(raw_id: str) -> str:
-    """Strip all characters except alphanumeric, underscore, and dash."""
-    return re.sub(r"[^a-zA-Z0-9_\-]", "", raw_id)
+    """URL-encode characters outside [a-zA-Z0-9_-] so IDs are filesystem-safe."""
+    return re.sub(
+        r"[^a-zA-Z0-9_\-]",
+        lambda m: f"%{ord(m.group()):02X}",
+        raw_id,
+    )
+
+
+def _shard(item_id: str) -> str:
+    # Take 2 logical characters from the end, where %XX counts as one.
+    if not item_id:
+        raise ValueError("Cannot shard an empty ID")
+    taken = 0
+    pos = len(item_id)
+    while taken < 2 and pos > 0:
+        if pos >= 3 and item_id[pos - 3] == "%":
+            pos -= 3
+        else:
+            pos -= 1
+        taken += 1
+    return item_id[pos:]
 
 
 def _is_done(item_dir: Path, item_id: str) -> bool:
@@ -1317,7 +1336,7 @@ THE PIPELINE DIRECTORY
         loader.sh          (optional)
         collect.sh         (optional)
         state/             (created automatically)
-          ab/
+          23/
             abc123/
               abc123.data
               abc123.run.0
@@ -1361,10 +1380,21 @@ THE PIPELINE
      what makes etl idempotent — run it as often as you want and
      each item is processed processed successfully only once.
 
-     IDs are sanitized to [a-zA-Z0-9_-]. State is stored in
-     state/<first-two-chars>/<id>/. IDs must be consistent
-     across runs: if your extractor produces different IDs for
-     the same item each time, dedup won't work.
+     IDs are made filesystem-safe by URL-encoding characters
+     outside [a-zA-Z0-9_-] (e.g. @ becomes %40). State is
+     stored in state/<shard>/<id>/. The shard is the last two
+     logical characters of the ID, where %XX escapes count as
+     one character (so the shard may be 2 to 6 bytes long).
+     Sharding on the end distributes items well for auto-
+     increment numbers (1, 2, ... 99, 100), most UUID formats,
+     and URLs with IDs at the end — unlike first-char sharding
+     which would put all URLs under "ht". If your IDs cluster
+     badly at the end (e.g. all end in the same suffix),
+     append a distinguishing token, such as a hash part.
+
+     IDs must be consistent across runs: if your extractor
+     produces different IDs for the same item each time, dedup
+     won't work.
 
      Items that failed previously (<id>.run.<non-zero>) are
      retried automatically — they pass dedup because there is

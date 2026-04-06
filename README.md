@@ -121,7 +121,7 @@ THE PIPELINE DIRECTORY
         loader.sh          (optional)
         collect.sh         (optional)
         state/             (created automatically)
-          ab/
+          23/
             abc123/
               abc123.data
               abc123.run.0
@@ -165,10 +165,21 @@ THE PIPELINE
      what makes etl idempotent — run it as often as you want and
      each item is processed processed successfully only once.
 
-     IDs are sanitized to [a-zA-Z0-9_-]. State is stored in
-     state/<first-two-chars>/<id>/. IDs must be consistent
-     across runs: if your extractor produces different IDs for
-     the same item each time, dedup won't work.
+     IDs are made filesystem-safe by URL-encoding characters
+     outside [a-zA-Z0-9_-] (e.g. @ becomes %40). State is
+     stored in state/<shard>/<id>/. The shard is the last two
+     logical characters of the ID, where %XX escapes count as
+     one character (so the shard may be 2 to 6 bytes long).
+     Sharding on the end distributes items well for auto-
+     increment numbers (1, 2, ... 99, 100), most UUID formats,
+     and URLs with IDs at the end — unlike first-char sharding
+     which would put all URLs under "ht". If your IDs cluster
+     badly at the end (e.g. all end in the same suffix),
+     append a distinguishing token, such as a hash part.
+
+     IDs must be consistent across runs: if your extractor
+     produces different IDs for the same item each time, dedup
+     won't work.
 
      Items that failed previously (<id>.run.<non-zero>) are
      retried automatically — they pass dedup because there is
