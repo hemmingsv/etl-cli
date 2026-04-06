@@ -1370,6 +1370,11 @@ THE PIPELINE
      retried automatically — they pass dedup because there is
      no .run.0, so they go through transform and load again.
 
+     Within a single run, etl also deduplicates IDs that appear
+     more than once in the extractor output. This in-memory set
+     is bounded to 10,000 entries to support eternal extractors
+     without leaking memory.
+
   3. TRANSFORM (-t CMD, optional)
      The extractor can only output line-separated items, so the
      transform step exists to reshape data into the format the
@@ -1470,7 +1475,9 @@ EXIT CODES AND STDERR FORWARDING
   etl itself never writes to stdout during a normal run — only
   --dry-run, etl list, and etl status produce stdout output.
 
-  On SIGINT/SIGTERM, etl exits immediately. This is safe:
+  etl does not install signal handlers. On SIGINT (ctrl-C) or
+  SIGTERM, the process exits via Python's default behavior. This
+  is safe:
   re-running the pipeline picks up where it left off. Items
   without .run.0 are retried, items already done are skipped,
   and partially written .data files are overwritten on retry.
