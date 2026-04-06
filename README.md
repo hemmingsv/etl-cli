@@ -175,7 +175,8 @@ THE PIPELINE
      and URLs with IDs at the end — unlike first-char sharding
      which would put all URLs under "ht". If your IDs cluster
      badly at the end (e.g. all end in the same suffix),
-     append a distinguishing token, such as a hash part.
+     append a distinguishing token (e.g. a hash), or extract
+     a unique part from the original ID to use as the ID.
 
      IDs must be consistent across runs: if your extractor
      produces different IDs for the same item each time, dedup
